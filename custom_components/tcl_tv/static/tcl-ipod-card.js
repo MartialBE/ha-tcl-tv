@@ -52,6 +52,7 @@ const CARD_STYLE = `
   input[type=range] { display:block; width:100%; margin:23px 0 10px; accent-color:#8c83aa; height:26px; cursor:pointer; }
   .volume-actions { display:flex; justify-content:center; gap:12px; }
   .volume-actions button { display:grid; place-items:center; width:43px; height:36px; border-radius:13px; border:1px solid var(--line); background:var(--glass); color:var(--ink); }
+  [data-repeat] { -webkit-touch-callout:none; user-select:none; -webkit-user-select:none; }
   .feedback { min-height:19px; padding:4px 5px 0; margin:0; color:var(--muted); font-size:10px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; text-align:center; }
   .feedback.error { color:#9d343e; }
   .wheel-wrap { width:min(100%,268px); margin:0 auto; }
@@ -116,6 +117,9 @@ const esc = (text) => String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp
 const PALETTE = [["#ece4f8","#7e639a"],["#deeee8","#507e71"],["#f6e3df","#a3635c"],["#e0e7f7","#5b73a2"],["#f1e8d6","#927643"],["#e4e5ef","#6d6b88"]];
 const PAGES = [["remote","遥控"],["apps","应用"],["volume","音量"]];
 const PAGE_SIZE = 6;
+// Long-press cadence copies TCL's own phone remote (docs/protocol.md): the TV
+// has no key-down/up message, a held key is just the same key resent.
+const HOLD = {pad:{delay:300,every:300}, volume:{delay:300,every:200}};
 
 class TclIpodCard extends HTMLElement {
   constructor() {
@@ -129,6 +133,13 @@ class TclIpodCard extends HTMLElement {
     this._feedback = "";
     this.shadowRoot.addEventListener("click", (event) => this._click(event));
     this.shadowRoot.addEventListener("keydown", (event) => this._key(event));
+    this.shadowRoot.addEventListener("pointerdown", (event) => {
+      const button = event.target.closest("button[data-repeat]");
+      if (button && !button.disabled && event.isPrimary && event.button === 0) this._startHold(button, event.pointerId);
+    });
+    this.shadowRoot.addEventListener("contextmenu", (event) => {
+      if (event.target.closest("[data-repeat]")) event.preventDefault();
+    });
     this.shadowRoot.addEventListener("input", (event) => {
       if (event.target.matches('input[type="range"]')) {
         this.shadowRoot.querySelector(".volume-value").innerHTML = `${Number(event.target.value)}<small>%</small>`;
@@ -151,6 +162,7 @@ class TclIpodCard extends HTMLElement {
   }
 
   set hass(hass) { this._hass = hass; this._render(); }
+  disconnectedCallback() { this._stopHold(); }
   getCardSize() { return 12; }
   getGridOptions() { return {columns:12, rows:"auto", min_columns:12}; }
   _player() { return this._hass?.states[this._config?.media_player]; }
@@ -163,10 +175,10 @@ class TclIpodCard extends HTMLElement {
     this.shadowRoot.innerHTML = `<style>${CARD_STYLE}</style><div class="shell" role="group" aria-label="电视遥控器">
       <div class="screen-frame"><div class="screen"><div class="status"></div><nav class="tabs" aria-label="遥控器页面"></nav><div class="screen-content"></div><p class="feedback" role="status"></p></div></div>
       <div class="wheel-wrap"><div class="wheel" tabindex="0" role="group" aria-label="电视方向与确认" title="始终控制电视方向与确认">
-        <button class="wheel-key wheel-up" data-action="up" aria-label="上">${icon("up")}</button>
-        <button class="wheel-key wheel-left" data-action="left" aria-label="左">${icon("left")}</button>
-        <button class="wheel-key wheel-right" data-action="right" aria-label="右">${icon("right")}</button>
-        <button class="wheel-key wheel-down" data-action="down" aria-label="下">${icon("down")}</button>
+        <button class="wheel-key wheel-up" data-action="up" data-repeat="pad" aria-label="上">${icon("up")}</button>
+        <button class="wheel-key wheel-left" data-action="left" data-repeat="pad" aria-label="左">${icon("left")}</button>
+        <button class="wheel-key wheel-right" data-action="right" data-repeat="pad" aria-label="右">${icon("right")}</button>
+        <button class="wheel-key wheel-down" data-action="down" data-repeat="pad" aria-label="下">${icon("down")}</button>
         <button class="wheel-center" data-action="ok" aria-label="电视确认">${icon("check")}</button>
       </div>
       <div class="transport"><button data-action="local-menu" aria-label="遥控页面" title="遥控页面">${icon("remote")}</button><button data-key="back" aria-label="电视返回" title="返回">${icon("back")}</button><button data-key="playback" aria-label="电视播放暂停" title="播放 / 暂停">${icon("playback")}</button><button data-key="source" aria-label="电视信号源" title="信号源">${icon("source")}</button></div></div>
@@ -193,17 +205,20 @@ class TclIpodCard extends HTMLElement {
       this._dial.carry -= step*.3;
       this._dial.moved = true;
       if (!wheel.hasPointerCapture(event.pointerId)) wheel.setPointerCapture(event.pointerId);
+      this._stopHold();
       this._rotate(step);
     });
     const stop = (event) => {
       if (event.pointerId !== this._dial?.id) return;
-      this._suppressClick = this._dial.moved ? performance.now()+350 : 0;
+      if (this._dial.moved) this._suppressClick = performance.now()+350;
       this._dial = null;
       if (wheel.hasPointerCapture(event.pointerId)) wheel.releasePointerCapture(event.pointerId);
     };
     wheel.addEventListener("pointerup",stop);
     wheel.addEventListener("pointercancel",stop);
-    wheel.addEventListener("lostpointercapture",stop);
+    // Touch implicitly captures the key under the finger; handing capture to the wheel
+    // fires that key's lostpointercapture, which bubbles here and must not end the drag.
+    wheel.addEventListener("lostpointercapture",(event) => { if (event.target === wheel) stop(event); });
     wheel.addEventListener("wheel",(event) => {
       event.preventDefault();
       if (performance.now()-(this._wheelAt ?? 0)<100 || !event.deltaY) return;
@@ -252,7 +267,7 @@ class TclIpodCard extends HTMLElement {
     } else {
       const volume = player?.attributes.volume_level;
       const pct = this._online() && typeof volume==="number" ? Math.round(volume*100) : null;
-      content = `<div class="section-title"><h2>刚刚好的音量</h2>${icon("volume")}</div><div class="volume-panel"><div class="volume-value">${pct ?? "—"}<small>%</small></div><input type="range" min="0" max="100" value="${pct ?? 0}" aria-label="电视音量" ${pct===null?"disabled":""}><div class="volume-actions"><button data-volume="-1" aria-label="降低音量" ${disabled}>${icon("minus")}</button><button data-key="mute" aria-label="切换静音" ${disabled}>${icon("mute")}</button><button data-volume="1" aria-label="提高音量" ${disabled}>${icon("plus")}</button></div></div>`;
+      content = `<div class="section-title"><h2>刚刚好的音量</h2>${icon("volume")}</div><div class="volume-panel"><div class="volume-value">${pct ?? "—"}<small>%</small></div><input type="range" min="0" max="100" value="${pct ?? 0}" aria-label="电视音量" ${pct===null?"disabled":""}><div class="volume-actions"><button data-volume="-1" data-repeat="volume" aria-label="降低音量" ${disabled}>${icon("minus")}</button><button data-key="mute" aria-label="切换静音" ${disabled}>${icon("mute")}</button><button data-volume="1" data-repeat="volume" aria-label="提高音量" ${disabled}>${icon("plus")}</button></div></div>`;
     }
     this.shadowRoot.querySelector(".screen-content").innerHTML = content;
     this.shadowRoot.querySelectorAll(".transport [data-key]").forEach((button)=>{button.disabled=!this._online();});
@@ -270,19 +285,21 @@ class TclIpodCard extends HTMLElement {
   _click(event) {
     const button = event.target.closest("button");
     if (!button || button.disabled) return;
-    if (button.closest(".wheel") && performance.now() < (this._suppressClick ?? 0)) return;
+    // The click synthesized by releasing a drag or a held key was already handled.
+    if ((button.closest(".wheel") || button.dataset.repeat) && performance.now() < (this._suppressClick ?? 0)) return;
     const data = button.dataset;
-    if (data.tab) return this._navigate(data.tab);
+    if (data.tab) { this._haptic(); return this._navigate(data.tab); }
     // Only explicit app tiles launch apps. The TV pad never selects an app.
     if (data.app !== undefined) return this._launchApp(data.source);
     if (data.page) {
       const lastPage = Math.max(0,Math.ceil(this._apps().length/PAGE_SIZE)-1);
       this._appPage = Math.max(0,Math.min(lastPage,this._appPage+Number(data.page)));
+      this._haptic();
       return this._render(true);
     }
     if (data.volume) return this._volume(Number(data.volume));
     if (data.key) return this._sendKey(data.key);
-    if (data.action === "local-menu") return this._navigate("remote");
+    if (data.action === "local-menu") { this._haptic(); return this._navigate("remote"); }
     if (data.action === "power") {
       if (!this._player() || !this._remote()) return this._message("请检查卡片的实体配置",true);
       return this._call("media_player",this._player().state==="on"?"turn_off":"turn_on",{},this._player().state==="on"?"已发送关机按键":"已发送唤醒包，等待电视连接");
@@ -307,11 +324,47 @@ class TclIpodCard extends HTMLElement {
     this._sendKey(key);
   }
 
+  // Holding a key resends it on TCL's cadence until release; a short tap stays a plain click.
+  _startHold(button, pointerId) {
+    this._stopHold();
+    const kind = button.dataset.repeat, cadence = HOLD[kind];
+    const step = Number(button.dataset.volume), key = button.dataset.action;
+    const hold = {fired:false, timer:0};
+    const tick = async () => {
+      if (this._hold !== hold) return;
+      // Offline: stop quietly; the release click reports the error once.
+      if (!this._online()) return this._stopHold();
+      hold.fired = true;
+      const started = performance.now();
+      await (kind === "volume" ? this._volume(step) : this._sendKey(key));
+      if (this._hold === hold) hold.timer = setTimeout(tick, Math.max(0, cadence.every-(performance.now()-started)));
+    };
+    hold.release = (event) => { if (event.type === "blur" || event.pointerId === pointerId) this._stopHold(true); };
+    for (const type of ["pointerup","pointercancel","blur"]) window.addEventListener(type, hold.release, true);
+    hold.timer = setTimeout(tick, cadence.delay);
+    this._hold = hold;
+  }
+
+  _stopHold(released = false) {
+    const hold = this._hold;
+    if (!hold) return;
+    this._hold = null;
+    clearTimeout(hold.timer);
+    for (const type of ["pointerup","pointercancel","blur"]) window.removeEventListener(type, hold.release, true);
+    if (released && hold.fired) this._suppressClick = performance.now()+350;
+  }
+
+  // HA forwards this event to the Companion app's native haptics, or to navigator.vibrate
+  // in browsers where the user profile enables vibration.
+  _haptic(type = "light") {
+    this.dispatchEvent(new CustomEvent("haptic", {detail:type, bubbles:true, composed:true}));
+  }
+
   _launchApp(source) {
     if (source) this._call("media_player","select_source",{source},`已发送打开「${source}」`);
   }
-  _volume(step) { this._call("media_player",step>0?"volume_up":"volume_down"); }
-  _sendKey(command) { this._call("remote","send_command",{command:[command]}); }
+  _volume(step) { return this._call("media_player",step>0?"volume_up":"volume_down"); }
+  _sendKey(command) { return this._call("remote","send_command",{command:[command]}); }
 
   async _call(domain,service,data={},message="") {
     if (!this._hass) return;
@@ -320,12 +373,14 @@ class TclIpodCard extends HTMLElement {
       if (service === "volume_set") this._pendingVolume = data.volume_level;
       return;
     }
-    if (service!=="turn_on" && !this._online()) return this._message("电视未连接",true);
+    if (service!=="turn_on" && !this._online()) { this._haptic("failure"); return this._message("电视未连接",true); }
     this._busy = true;
+    this._haptic();
     try {
       await this._hass.callService(domain,service,{entity_id:this._config[domain],...data});
       this._message(message);
     } catch (error) {
+      this._haptic("failure");
       this._message(error.message || "指令发送失败",true);
     } finally {
       this._busy = false;
