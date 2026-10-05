@@ -1,7 +1,7 @@
 {
   "domain": "tcl_tv",
   "name": "TCL TV LAN Remote",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "codeowners": ["@DusKing1"],
   "config_flow": true,
   "dependencies": ["frontend", "http", "lovelace"],
