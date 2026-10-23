@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import voluptuous as vol
 
@@ -20,10 +19,7 @@ from .const import DOMAIN, PLATFORMS
 from .entity import tv_errors
 from .hub import TclTvHub
 
-if TYPE_CHECKING:
-    type TclTvConfigEntry = ConfigEntry[TclTvHub]
-else:
-    TclTvConfigEntry = ConfigEntry
+TclTvConfigEntry = ConfigEntry[TclTvHub]
 
 _LOGGER = logging.getLogger(__name__)
 CARD_PATH = "/tcl_tv_static/tcl-ipod-card.js"
@@ -31,6 +27,46 @@ CARD_PATH = "/tcl_tv_static/tcl-ipod-card.js"
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Serve the card, register services, and register it in the dashboard's resource collection."""
+    
+    async def async_handle_homekit_remote_key(event) -> None:
+        """Handle HomeKit TV remote key press events automatically."""
+        # Map HomeKit key names to TCL remote commands
+        key_mapping = {
+            "arrow_up": "up",
+            "arrow_down": "down",
+            "arrow_left": "left",
+            "arrow_right": "right",
+            "select": "ok",
+            "back": "back",
+            "play_pause": "playback",
+            "information": "info",
+        }
+        
+        entity_id = event.data.get("entity_id")
+        key_name = event.data.get("key_name")
+        
+        # Only handle events for our media_player entities
+        if not entity_id or not entity_id.startswith(f"media_player.{DOMAIN}_"):
+            return
+            
+        tcl_command = key_mapping.get(key_name)
+        if not tcl_command:
+            return
+        
+        # Find the corresponding remote entity
+        # media_player.tcl_tv_xxx -> remote.tcl_tv_xxx_remote
+        remote_id = entity_id.replace("media_player.", "remote.") + "_remote"
+        
+        # Call remote.send_command
+        await hass.services.async_call(
+            "remote",
+            "send_command",
+            {"entity_id": remote_id, "command": tcl_command},
+            blocking=True,
+        )
+    
+    # Register HomeKit remote key event listener
+    hass.bus.async_listen("homekit_tv_remote_key_pressed", async_handle_homekit_remote_key)
     
     async def async_send_text(call: ServiceCall) -> None:
         """Send text to the TV via IME (message ID 155)."""

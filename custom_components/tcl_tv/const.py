@@ -14,3 +14,13 @@ CLIENT_NAME = "HomeAssistant"
 
 RECONNECT_INTERVAL = 5.0  # seconds between connect attempts while the TV is away
 VOLUME_POLL_INTERVAL = 10.0  # the TV pushes nothing when volume changes
+
+# Apps to exclude from HomeKit input source list
+EXCLUDED_APPS = [
+    "天气预报",
+    "T惠购",
+    "游戏中心",
+    "用户中心",
+    "影视",
+    "媒体中心",
+]

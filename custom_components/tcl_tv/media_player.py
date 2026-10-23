@@ -12,6 +12,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import TclTvConfigEntry
+from .const import EXCLUDED_APPS
 from .entity import TclTvEntity, tv_errors
 from .protocol import KEYS
 
@@ -35,6 +36,8 @@ class TclTvMediaPlayer(TclTvEntity, MediaPlayerEntity):
         | MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.VOLUME_STEP
         | MediaPlayerEntityFeature.SELECT_SOURCE
+        | MediaPlayerEntityFeature.PLAY
+        | MediaPlayerEntityFeature.PAUSE
     )
 
     @property
@@ -51,7 +54,11 @@ class TclTvMediaPlayer(TclTvEntity, MediaPlayerEntity):
 
     @property
     def source_list(self) -> list[str]:
-        return [app.name for app in self.hub.apps]
+        # Filter out excluded apps (system apps and unwanted apps)
+        return [
+            app.name for app in self.hub.apps 
+            if app.name not in EXCLUDED_APPS
+        ]
 
     async def async_turn_on(self) -> None:
         await self.hub.async_turn_on()
@@ -84,3 +91,8 @@ class TclTvMediaPlayer(TclTvEntity, MediaPlayerEntity):
             )
         with tv_errors():
             await self.hub.require_client().launch_app(package)
+
+    async def async_media_play_pause(self) -> None:
+        """Send play/pause key (called by HomeKit Bridge)."""
+        with tv_errors():
+            await self.hub.require_client().send_key(KEYS["playback"])
