@@ -332,6 +332,14 @@ class TclTvClient:
     async def launch_app(self, package: str) -> None:
         await self._send(f"223>>OPEN>>{package}")
 
+    async def send_text(self, text: str) -> None:
+        """Send text via IME (message ID 155).
+        
+        The TV must have focus on a text input field before this is called.
+        Text containing '>>' has ambiguous parsing risk per protocol.md.
+        """
+        await self._send(f"155{_SEP}{text}")
+
     # ---- transport ------------------------------------------------------
 
     def _write(self, text: str, plain: bool = False) -> None:

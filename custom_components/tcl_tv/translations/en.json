@@ -15,5 +15,21 @@
     "abort": {
       "already_configured": "This TV is already configured."
     }
+  },
+  "services": {
+    "send_text": {
+      "name": "Send text",
+      "description": "Send text to the TV via IME (message ID 155). The TV must have focus on a text input field before calling this service.",
+      "fields": {
+        "text": {
+          "name": "Text",
+          "description": "The text to send to the TV. Text containing '>>' may have parsing issues."
+        },
+        "entity_id": {
+          "name": "Entity",
+          "description": "Target entity (remote or media_player). If not specified, sends to all configured TCL TVs."
+        }
+      }
+    }
   }
 }

@@ -3,17 +3,33 @@
     "step": {
       "user": {
         "title": "TCL 电视",
-        "description": "添加时电视必须开着，且能访问 UDP 6537 / TCP 6553。",
+        "description": "电视必须开机且可达（UDP 6537 / TCP 6553）",
         "data": {
           "host": "IP 地址"
         }
       }
     },
     "error": {
-      "cannot_connect": "这个地址上没有 TCL 遥控服务应答。电视开着吗？"
+      "cannot_connect": "此地址没有 TCL 远程服务响应。电视是否已开机？"
     },
     "abort": {
-      "already_configured": "这台电视已经添加过了。"
+      "already_configured": "此电视已配置。"
+    }
+  },
+  "services": {
+    "send_text": {
+      "name": "发送文本",
+      "description": "通过 IME（消息ID 155）向电视发送文本。调用此服务前，电视必须已将焦点置于文本输入框。",
+      "fields": {
+        "text": {
+          "name": "文本",
+          "description": "要发送到电视的文本。包含 '>>' 的文本可能存在解析问题。"
+        },
+        "entity_id": {
+          "name": "实体",
+          "description": "目标实体（remote 或 media_player）。如果未指定，则发送到所有已配置的 TCL 电视。"
+        }
+      }
     }
   }
 }

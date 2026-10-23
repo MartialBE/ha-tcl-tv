@@ -3,25 +3,79 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import voluptuous as vol
 
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN, PLATFORMS
+from .entity import tv_errors
 from .hub import TclTvHub
 
-type TclTvConfigEntry = ConfigEntry[TclTvHub]
+if TYPE_CHECKING:
+    type TclTvConfigEntry = ConfigEntry[TclTvHub]
+else:
+    TclTvConfigEntry = ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 CARD_PATH = "/tcl_tv_static/tcl-ipod-card.js"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Serve the card and register it in the dashboard's resource collection."""
+    """Serve the card, register services, and register it in the dashboard's resource collection."""
+    
+    async def async_send_text(call: ServiceCall) -> None:
+        """Send text to the TV via IME (message ID 155)."""
+        text: str = call.data["text"]
+        
+        # Find all TCL TV entries
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            raise ServiceValidationError("No TCL TV configured")
+        
+        # If entity_id is provided, find the matching entry
+        if "entity_id" in call.data:
+            entity_id = call.data["entity_id"]
+            # Extract the device from entity registry
+            import homeassistant.helpers.entity_registry as er
+            entity_registry = er.async_get(hass)
+            entity_entry = entity_registry.async_get(entity_id)
+            if not entity_entry:
+                raise ServiceValidationError(f"Entity {entity_id} not found")
+            
+            # Find the config entry for this entity
+            entry = next(
+                (e for e in entries if e.entry_id == entity_entry.config_entry_id),
+                None
+            )
+            if not entry:
+                raise ServiceValidationError(f"Config entry for {entity_id} not found")
+            entries = [entry]
+        
+        # Send text to all matched TVs
+        for entry in entries:
+            hub: TclTvHub = entry.runtime_data
+            with tv_errors():
+                client = hub.require_client()
+                await client.send_text(text)
+    
+    hass.services.async_register(
+        DOMAIN,
+        "send_text",
+        async_send_text,
+        schema=vol.Schema({
+            vol.Required("text"): cv.string,
+            vol.Optional("entity_id"): cv.entity_id,
+        }),
+    )
     component_dir = Path(__file__).parent
     integration = await async_get_integration(hass, DOMAIN)
     card_url = f"{CARD_PATH}?v={integration.version}"

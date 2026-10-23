@@ -1,0 +1,17 @@
+send_text:
+  fields:
+    text:
+      required: true
+      example: "搜索内容"
+      selector:
+        text:
+    entity_id:
+      required: false
+      example: "remote.tcl_tv_remote"
+      selector:
+        entity:
+          filter:
+            - domain: remote
+              integration: tcl_tv
+            - domain: media_player
+              integration: tcl_tv
