@@ -31,6 +31,8 @@ class TclTvHub:
         self._wake_macs = list(dict.fromkeys([entry.data[CONF_ACTIVE_MAC], entry.data[CONF_MAC]]))
         self.client: TclTvClient | None = None
         self.volume: int | None = None
+        # Volume to restore on unmute; None means the TV was already silent.
+        self.mute_level: int | None = None
         self.apps: list[TvApp] = []
         # False until the first connect attempt settles, so a restart does not
         # record a spurious off -> on transition.

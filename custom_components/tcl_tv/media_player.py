@@ -35,6 +35,7 @@ class TclTvMediaPlayer(TclTvEntity, MediaPlayerEntity):
         | MediaPlayerEntityFeature.TURN_OFF
         | MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.VOLUME_STEP
+        | MediaPlayerEntityFeature.VOLUME_MUTE
         | MediaPlayerEntityFeature.SELECT_SOURCE
     )
 
@@ -49,6 +50,12 @@ class TclTvMediaPlayer(TclTvEntity, MediaPlayerEntity):
         if not self.hub.connected or self.hub.volume is None:
             return None
         return self.hub.volume / 100
+
+    @property
+    def is_volume_muted(self) -> bool | None:
+        if not self.hub.connected or self.hub.volume is None:
+            return None
+        return self.hub.volume == 0
 
     @property
     def source_list(self) -> list[str]:
@@ -68,6 +75,22 @@ class TclTvMediaPlayer(TclTvEntity, MediaPlayerEntity):
     async def async_set_volume_level(self, volume: float) -> None:
         with tv_errors():
             await self.hub.require_client().set_volume(round(volume * 100))
+            await self.hub.async_refresh_volume()
+
+    async def async_mute_volume(self, mute: bool) -> None:
+        """The TV's MUTE key is a toggle with no readback, so mute is emulated by volume."""
+        with tv_errors():
+            client = self.hub.require_client()
+            current = self.hub.volume if self.hub.volume is not None else await client.get_volume()
+            if mute:
+                if current == 0:
+                    return
+                self.hub.mute_level = current
+                await client.set_volume(0)
+            else:
+                level = self.hub.mute_level if self.hub.mute_level is not None else 10
+                self.hub.mute_level = None
+                await client.set_volume(level)
             await self.hub.async_refresh_volume()
 
     async def async_volume_up(self) -> None:

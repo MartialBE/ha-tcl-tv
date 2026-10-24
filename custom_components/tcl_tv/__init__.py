@@ -35,8 +35,8 @@ HOMEKIT_KEYS = {
     "arrow_right": "right",
     "select": "ok",
     "back": "back",
-    "play_pause": "playback",
-    "information": "info",
+    "play_pause": "ok",
+    "information": "menu",
 }
 
 
