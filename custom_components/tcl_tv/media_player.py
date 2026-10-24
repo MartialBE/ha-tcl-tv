@@ -81,9 +81,11 @@ class TclTvMediaPlayer(TclTvEntity, MediaPlayerEntity):
         """The TV's MUTE key is a toggle with no readback, so mute is emulated by volume."""
         with tv_errors():
             client = self.hub.require_client()
-            current = self.hub.volume if self.hub.volume is not None else await client.get_volume()
+            # Read live: the polled value lags up to VOLUME_POLL_INTERVAL seconds.
+            current = await client.get_volume()
             if mute:
                 if current == 0:
+                    self.hub.volume = current
                     return
                 self.hub.mute_level = current
                 await client.set_volume(0)
