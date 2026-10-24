@@ -409,7 +409,7 @@ class TclTvClient:
                 _LOGGER.debug("%s silent for %.0fs, dropping link", self.host, now - self._last_rx)
                 await self.close()
                 return
-            if now - self._last_tx >= HEARTBEAT_IDLE:
+            if now - self._last_tx >= HEARTBEAT_IDLE or now - self._last_rx >= HEARTBEAT_IDLE:
                 try:
                     await self._send("150>>")
                 except TclTvError:
