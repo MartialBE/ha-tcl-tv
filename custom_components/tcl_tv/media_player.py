@@ -36,8 +36,6 @@ class TclTvMediaPlayer(TclTvEntity, MediaPlayerEntity):
         | MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.VOLUME_STEP
         | MediaPlayerEntityFeature.SELECT_SOURCE
-        | MediaPlayerEntityFeature.PLAY
-        | MediaPlayerEntityFeature.PAUSE
     )
 
     @property
@@ -92,7 +90,3 @@ class TclTvMediaPlayer(TclTvEntity, MediaPlayerEntity):
         with tv_errors():
             await self.hub.require_client().launch_app(package)
 
-    async def async_media_play_pause(self) -> None:
-        """Send play/pause key (called by HomeKit Bridge)."""
-        with tv_errors():
-            await self.hub.require_client().send_key(KEYS["playback"])

@@ -10,63 +10,66 @@ from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.core import Event, HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN, PLATFORMS
 from .entity import tv_errors
 from .hub import TclTvHub
+from .protocol import KEYS
 
 TclTvConfigEntry = ConfigEntry[TclTvHub]
 
 _LOGGER = logging.getLogger(__name__)
 CARD_PATH = "/tcl_tv_static/tcl-ipod-card.js"
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+HOMEKIT_KEYS = {
+    "arrow_up": "up",
+    "arrow_down": "down",
+    "arrow_left": "left",
+    "arrow_right": "right",
+    "select": "ok",
+    "back": "back",
+    "play_pause": "playback",
+    "information": "info",
+}
+
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Serve the card, register services, and register it in the dashboard's resource collection."""
     
-    async def async_handle_homekit_remote_key(event) -> None:
-        """Handle HomeKit TV remote key press events automatically."""
-        # Map HomeKit key names to TCL remote commands
-        key_mapping = {
-            "arrow_up": "up",
-            "arrow_down": "down",
-            "arrow_left": "left",
-            "arrow_right": "right",
-            "select": "ok",
-            "back": "back",
-            "play_pause": "playback",
-            "information": "info",
-        }
-        
+    async def async_handle_homekit_remote_key(event: Event) -> None:
+        """Forward HomeKit TV remote keys to the TV that owns the entity."""
         entity_id = event.data.get("entity_id")
-        key_name = event.data.get("key_name")
-        
-        # Only handle events for our media_player entities
-        if not entity_id or not entity_id.startswith(f"media_player.{DOMAIN}_"):
+        tcl_key = HOMEKIT_KEYS.get(event.data.get("key_name", ""))
+        if not entity_id or tcl_key is None:
             return
-            
-        tcl_command = key_mapping.get(key_name)
-        if not tcl_command:
+        registered = er.async_get(hass).async_get(entity_id)
+        if (
+            registered is None
+            or registered.platform != DOMAIN
+            or registered.config_entry_id is None
+        ):
             return
-        
-        # Find the corresponding remote entity
-        # media_player.tcl_tv_xxx -> remote.tcl_tv_xxx_remote
-        remote_id = entity_id.replace("media_player.", "remote.") + "_remote"
-        
-        # Call remote.send_command
-        await hass.services.async_call(
-            "remote",
-            "send_command",
-            {"entity_id": remote_id, "command": tcl_command},
-            blocking=True,
-        )
+        entry = hass.config_entries.async_get_entry(registered.config_entry_id)
+        if entry is None or entry.runtime_data is None:
+            return
+        hub: TclTvHub = entry.runtime_data
+        _LOGGER.debug("HomeKit %s -> %s (%s)", event.data["key_name"], tcl_key, entity_id)
+        try:
+            with tv_errors():
+                await hub.require_client().send_key(KEYS[tcl_key])
+        except HomeAssistantError as err:
+            _LOGGER.warning("HomeKit key %s on %s failed: %s", tcl_key, entity_id, err)
     
     # Register HomeKit remote key event listener
     hass.bus.async_listen("homekit_tv_remote_key_pressed", async_handle_homekit_remote_key)
+    _LOGGER.debug("HomeKit remote key forwarding registered")
     
     async def async_send_text(call: ServiceCall) -> None:
         """Send text to the TV via IME (message ID 155)."""
@@ -80,10 +83,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         # If entity_id is provided, find the matching entry
         if "entity_id" in call.data:
             entity_id = call.data["entity_id"]
-            # Extract the device from entity registry
-            import homeassistant.helpers.entity_registry as er
-            entity_registry = er.async_get(hass)
-            entity_entry = entity_registry.async_get(entity_id)
+            entity_entry = er.async_get(hass).async_get(entity_id)
             if not entity_entry:
                 raise ServiceValidationError(f"Entity {entity_id} not found")
             
